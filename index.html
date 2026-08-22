@@ -85,12 +85,8 @@
       const tiles = [];
       const mapW = 60 + (lvl - 1) * 10;
 
-      // Ground
+      // Ground (with gaps at x=20-21 and x=40-41)
       for (let x = 0; x < mapW; x++) {
-        if (x < 5 || x > mapW - 6 || (x > 10 && x < mapW - 10)) {
-          tiles.push({ type: 1, x, y: groundY });
-        }
-        // Gap at x=20-22, 40-42, etc.
         if (x !== 20 && x !== 21 && x !== 40 && x !== 41) {
           tiles.push({ type: 1, x, y: groundY });
         }
@@ -140,7 +136,7 @@
           x: ex * TILE, y: (13 - 1) * TILE,
           w: TILE - 4, h: TILE - 4,
           vx: -(0.8 + lvl * 0.3 + i * 0.1),
-          vy: 0, alive: true,
+          vy: 0, alive: true, dir: -1,
           stomped: false, stompTimer: 0
         });
       });
@@ -155,7 +151,9 @@
       mapW = mw;
       map = tiles.filter(t => t.type === 1 || t.type === 2);
       coins = tiles.filter(t => t.type === 3).map(t => ({ ...t, collected: false }));
-      goal = tiles.find(t => t.type === 4) || { x: (mw-4), y: 12 };
+      // Use the lowest goal tile (groundY - 1) as reference for the hitbox
+      const goalTiles = tiles.filter(t => t.type === 4);
+      goal = goalTiles.reduce((lowest, t) => t.y > lowest.y ? t : lowest, goalTiles[0] || { x: (mw-4), y: 12 });
 
       player = {
         x: TILE * 2, y: (13 - 2) * TILE,
@@ -299,8 +297,8 @@
         }
       });
 
-      // Goal
-      if (rectOverlap(player.x, player.y, player.w, player.h, goal.x * TILE, goal.y * TILE, TILE, TILE * 3)) {
+      // Goal — hitbox spans 4 tiles upward from lowest goal tile
+      if (rectOverlap(player.x, player.y, player.w, player.h, goal.x * TILE, (goal.y - 3) * TILE, TILE, TILE * 4)) {
         gameState = 'levelclear';
         stateTimer = 0;
         score += 500;
@@ -316,11 +314,12 @@
           if (e.stompTimer > 30) e.alive = false;
           return;
         }
+        if (Math.abs(e.vx) > 0.01) e.dir = Math.sign(e.vx);
         moveWithCollision(e);
-        // Reverse at edge/wall
-        if (e.vx === 0) e.vx = -(e.vx < 0 ? -1 : 1) * (0.8 + level * 0.3);
-        if (e.x < 0) e.vx = Math.abs(e.vx);
-        if (e.x + e.w > mapW * TILE) e.vx = -Math.abs(e.vx);
+        // Reverse at wall collision
+        if (e.vx === 0) e.vx = -e.dir * (0.8 + level * 0.3);
+        if (e.x < 0) { e.vx = Math.abs(e.vx); e.dir = 1; }
+        if (e.x + e.w > mapW * TILE) { e.vx = -Math.abs(e.vx); e.dir = -1; }
 
         // Player vs enemy
         if (!player.dead && rectOverlap(player.x, player.y, player.w, player.h, e.x, e.y, e.w, e.h)) {
@@ -370,16 +369,18 @@
     }
 
     function drawGoal(tx, ty) {
+      // ty is the lowest goal tile (groundY - 1); draw pole and flag from there upward
       const sx = tx * TILE - cameraX;
+      const baseY = ty * TILE + TILE; // bottom of pole at ground level
       // Pole
       ctx.fillStyle = '#888';
-      ctx.fillRect(sx + 14, ty * TILE - 2 * TILE, 4, 4 * TILE);
+      ctx.fillRect(sx + 14, baseY - 4 * TILE, 4, 4 * TILE);
       // Flag
       ctx.fillStyle = '#00cc00';
       ctx.beginPath();
-      ctx.moveTo(sx + 18, ty * TILE - 2 * TILE);
-      ctx.lineTo(sx + 18 + 20, ty * TILE - 2 * TILE + 12);
-      ctx.lineTo(sx + 18, ty * TILE - 2 * TILE + 24);
+      ctx.moveTo(sx + 18, baseY - 4 * TILE);
+      ctx.lineTo(sx + 18 + 20, baseY - 4 * TILE + 12);
+      ctx.lineTo(sx + 18, baseY - 4 * TILE + 24);
       ctx.fill();
     }
 
