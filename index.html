@@ -251,44 +251,6 @@
             e.vx = 0;
           }
 
-          function updateStatusDisplay() {
-            const status = [];
-            if (player && player.speedTimer > 0) status.push(`SPEED ${Math.ceil(player.speedTimer / 60)}s`);
-            if (player && player.giantTimer > 0) status.push(`GIANT ${Math.ceil(player.giantTimer / 60)}s`);
-            document.getElementById('statusDisplay').textContent = status.join(' | ');
-          }
-
-          function setGiantMode(enabled) {
-            const wasGiant = player.giantTimer > 0;
-            player.giantTimer = enabled ? POWERUP_DURATION.giant : 0;
-            if (enabled && !wasGiant) {
-              player.y -= 12;
-              player.w = 38;
-              player.h = 44;
-            } else if (!enabled && wasGiant) {
-              player.y += 12;
-              player.w = 28;
-              player.h = 32;
-            }
-          }
-
-          function collectPowerup(item) {
-            item.collected = true;
-            score += 250;
-            if (item.type === 'speed') player.speedTimer = POWERUP_DURATION.speed;
-            if (item.type === 'giant') setGiantMode(true);
-            document.getElementById('scoreDisplay').textContent = score;
-            document.getElementById('message').textContent = item.type === 'speed'
-              ? 'スピードアップ！'
-              : '巨大化！';
-          }
-
-          function hitPlayer() {
-            gameState = 'dead';
-            stateTimer = 0;
-            player.dead = true;
-            document.getElementById('message').textContent = 'ミス！';
-          }
         }
       }
       // Vertical
@@ -308,6 +270,45 @@
       // World bounds
       if (e.x < 0) { e.x = 0; e.vx = 0; }
       if (e.x + e.w > mapW * TILE) { e.x = mapW * TILE - e.w; e.vx = 0; }
+    }
+
+    function updateStatusDisplay() {
+      const status = [];
+      if (player && player.speedTimer > 0) status.push(`SPEED ${Math.ceil(player.speedTimer / 60)}s`);
+      if (player && player.giantTimer > 0) status.push(`GIANT ${Math.ceil(player.giantTimer / 60)}s`);
+      document.getElementById('statusDisplay').textContent = status.join(' | ');
+    }
+
+    function setGiantMode(enabled) {
+      const wasGiant = player.w > 28;
+      player.giantTimer = enabled ? POWERUP_DURATION.giant : 0;
+      if (enabled && !wasGiant) {
+        player.y -= 12;
+        player.w = 38;
+        player.h = 44;
+      } else if (!enabled && wasGiant) {
+        player.y += 12;
+        player.w = 28;
+        player.h = 32;
+      }
+    }
+
+    function collectPowerup(item) {
+      item.collected = true;
+      score += 250;
+      if (item.type === 'speed') player.speedTimer = POWERUP_DURATION.speed;
+      if (item.type === 'giant') setGiantMode(true);
+      document.getElementById('scoreDisplay').textContent = score;
+      document.getElementById('message').textContent = item.type === 'speed'
+        ? 'スピードアップ！'
+        : '巨大化！';
+    }
+
+    function hitPlayer() {
+      gameState = 'dead';
+      stateTimer = 0;
+      player.dead = true;
+      document.getElementById('message').textContent = 'ミス！';
     }
 
     // --- Update ---
