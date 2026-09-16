@@ -61,7 +61,7 @@
   </div>
   <canvas id="gameCanvas" width="800" height="480"></canvas>
   <div id="message"></div>
-  <div id="instructions">← → 移動 | スペース/↑ ジャンプ | アイテムを集めてゴールへ！</div>
+  <div id="instructions">← → 移動 | スペース/↑ ジャンプ | F/Shift ファイア攻撃 | アイテムを集めて全5ステージクリアを目指そう！</div>
 
   <script>
     const canvas = document.getElementById('gameCanvas');
@@ -69,101 +69,155 @@
     const W = canvas.width;
     const H = canvas.height;
     const TILE = 32;
+    const TOTAL_LEVELS = 5;
 
     // --- State ---
     let score = 0, lives = 3, level = 1;
     let gameState = 'playing'; // 'playing', 'dead', 'levelclear', 'gameover', 'win'
     let stateTimer = 0;
     let cameraX = 0;
+    let particles = [];
 
     // --- Input ---
     const keys = {};
-    document.addEventListener('keydown', e => { keys[e.code] = true; });
+    document.addEventListener('keydown', e => {
+      keys[e.code] = true;
+      if (e.code === 'KeyF' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') throwFireball();
+    });
     document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+    function mapWForLevel(lvl) {
+      return 60 + (lvl - 1) * 14;
+    }
+
+    // Bosses: one unique boss character per stage from stage 3 onward.
+    const BOSS_DATA = {
+      3: { hp: 2, body: '#c0392b', dark: '#7b241c', name: 'レッドキング' },
+      4: { hp: 3, body: '#34495e', dark: '#1b2631', name: 'アイアンロード' },
+      5: { hp: 4, body: '#8e44ad', dark: '#5b2c6f', name: 'ダークエンペラー' },
+    };
+
+    function levelFeatures(lvl) {
+      return {
+        flyers: lvl >= 2,
+        throwers: lvl >= 3,
+        stompers: lvl >= 4,
+        boss: lvl >= 3,
+      };
+    }
 
     // --- Level maps (tile rows, 0=air, 1=ground, 2=brick, 3=coin, 4=goal) ---
     function buildLevel(lvl) {
-      // Each level: array of {type, x, y} objects (grid coords)
-      // Platform layout varies per level
-      const groundY = 13; // bottom row (0-indexed)
+      const groundY = 13;
       const tiles = [];
-      const mapW = 60 + (lvl - 1) * 10;
+      const mapW = mapWForLevel(lvl);
 
-      // Ground (with gaps at x=20-21 and x=40-41)
+      // Pits grow in number with the stage, making traversal progressively harder.
+      const holeCandidates = [[20, 21], [40, 41], [58, 60], [74, 76], [92, 94]];
+      const holeCount = Math.min(1 + lvl, holeCandidates.length);
+      const holes = holeCandidates.slice(0, holeCount).filter(([, b]) => b < mapW - 10);
+      const inHole = x => holes.some(([a, b]) => x >= a && x <= b);
+
       for (let x = 0; x < mapW; x++) {
-        if (x !== 20 && x !== 21 && x !== 40 && x !== 41) {
-          tiles.push({ type: 1, x, y: groundY });
-        }
+        if (!inHole(x)) tiles.push({ type: 1, x, y: groundY });
       }
 
-      // Floating platforms
+      // Floating platforms (base pattern, then repeated/varied for longer maps)
       const platforms = [
-        [5,10],[8,10],[11,10],
-        [15,8],[16,8],[17,8],
-        [22,10],[25,10],
-        [30,9],[31,9],[32,9],
-        [36,8],[37,8],
-        [42,10],[43,10],[44,10],
-        [48,9],[49,9],
-        [53,8],[54,8],[55,8],
+        [5, 10], [8, 10], [11, 10],
+        [15, 8], [16, 8], [17, 8],
+        [22, 10], [25, 10],
+        [30, 9], [31, 9], [32, 9],
+        [36, 8], [37, 8],
+        [42, 10], [43, 10], [44, 10],
+        [48, 9], [49, 9],
+        [53, 8], [54, 8], [55, 8],
       ];
-      platforms.forEach(([px, py]) => tiles.push({ type: 2, x: px, y: py }));
-
-      // Staircases make the route more varied and create extra ways to reach platforms.
-      const stairs = [
-        [12,12],[13,11],[14,10],
-        [24,12],[25,11],[26,10],[27,9],
-        [45,12],[46,11],[47,10],
-        [57,12],[58,11],[59,10],
-        [mapW - 12,12],[mapW - 11,11],[mapW - 10,10]
-      ];
-      stairs.forEach(([sx, sy]) => {
-        if (sx < mapW - 5) tiles.push({ type: 2, x: sx, y: sy });
+      for (let base = 60; base < mapW - 12; base += 18) {
+        const h = 10 - (lvl % 3);
+        platforms.push([base + 2, h], [base + 5, h - 1], [base + 8, h - 2 < 6 ? 6 : h - 2], [base + 12, h]);
+      }
+      platforms.forEach(([px, py]) => {
+        if (px < mapW - 6) tiles.push({ type: 2, x: px, y: py });
       });
 
-      // Coins on platforms and air
+      // Staircases add extra vertical platforming challenge; taller on later stages.
+      const stairHeight = Math.min(3 + Math.floor(lvl / 2), 6);
+      const stairBases = [12, 24, 45, 57].concat(lvl >= 3 ? [68] : []).concat(lvl >= 4 ? [80] : []).concat(lvl >= 5 ? [96] : []);
+      stairBases.forEach(base => {
+        if (base + stairHeight * 2 >= mapW - 6) return;
+        for (let i = 0; i < stairHeight; i++) {
+          tiles.push({ type: 2, x: base + i, y: groundY - 1 - i });
+        }
+        for (let i = 0; i < stairHeight; i++) {
+          tiles.push({ type: 2, x: base + stairHeight + i, y: groundY - stairHeight + i });
+        }
+      });
+
+      // Coins scattered across platforms, stairs, and ground gaps.
       const coinPositions = [
-        [5,9],[8,9],[11,9],
-        [15,7],[17,7],
-        [22,9],[25,9],
-        [30,8],[32,8],
-        [36,7],[37,7],
-        [43,9],[44,9],
-        [48,8],[49,8],
-        [53,7],[55,7],
-        [3,12],[7,12],[14,12],[28,12],[45,12],[56,12],
+        [5, 9], [8, 9], [11, 9],
+        [15, 7], [17, 7],
+        [22, 9], [25, 9],
+        [30, 8], [32, 8],
+        [36, 7], [37, 7],
+        [43, 9], [44, 9],
+        [48, 8], [49, 8],
+        [53, 7], [55, 7],
+        [3, 12], [7, 12], [14, 12], [28, 12], [45, 12], [56, 12],
       ];
-      coinPositions.forEach(([cx, cy]) => tiles.push({ type: 3, x: cx, y: cy }));
+      for (let base = 62; base < mapW - 10; base += 16) {
+        coinPositions.push([base, 9], [base + 4, 8], [base + 8, 7]);
+      }
+      coinPositions.forEach(([cx, cy]) => {
+        if (cx < mapW - 5 && !inHole(cx)) tiles.push({ type: 3, x: cx, y: cy });
+      });
 
-      // Spikes are separate from solid tiles so they can be drawn as hazards.
-      const spikes = [
+      // Spikes are separate from solid tiles so they can be drawn/handled as hazards.
+      const spikeCandidates = [
         { x: 19, y: 12 }, { x: 29, y: 12 }, { x: 34, y: 12 },
-        { x: 50, y: 12 }, { x: 58, y: 9 }, { x: mapW - 16, y: 12 }
-      ].filter(spike => spike.x < mapW - 5);
+        { x: 50, y: 12 }, { x: 63, y: 12 }, { x: 71, y: 12 },
+        { x: 85, y: 12 }, { x: 98, y: 12 },
+      ];
+      const spikeCount = Math.min(2 + lvl, spikeCandidates.length);
+      const spikes = spikeCandidates.slice(0, spikeCount)
+        .filter(spike => spike.x < mapW - 5 && !inHole(spike.x));
 
-      // Collectibles with temporary abilities.
-      const powerups = [
+      // Collectibles: new abilities unlock progressively across stages.
+      const powerupCandidates = [
         { type: 'speed', x: 10, y: 8 },
         { type: 'giant', x: 18, y: 11 },
         { type: 'speed', x: 34, y: 7 },
-        { type: 'giant', x: 46, y: 7 },
-        { type: 'speed', x: mapW - 12, y: 9 }
-      ].filter(item => item.x < mapW - 5);
+        { type: 'fire', x: 46, y: 7 },
+        { type: 'giant', x: 52, y: 6 },
+        { type: 'star', x: 66, y: 7 },
+        { type: 'fire', x: 78, y: 8 },
+        { type: 'star', x: 90, y: 7 },
+      ];
+      const powerups = powerupCandidates
+        .filter(item => item.type !== 'fire' || lvl >= 3)
+        .filter(item => item.type !== 'star' || lvl >= 4)
+        .filter(item => item.x < mapW - 5 && !inHole(item.x));
 
       // Goal flag at end
       tiles.push({ type: 4, x: mapW - 4, y: groundY - 1 });
       tiles.push({ type: 4, x: mapW - 4, y: groundY - 2 });
       tiles.push({ type: 4, x: mapW - 4, y: groundY - 3 });
 
-      return { tiles, mapW, spikes, powerups };
+      return { tiles, mapW, spikes, powerups: powerups.map(p => ({ ...p })) };
     }
 
     // --- Enemy ---
     function makeEnemies(lvl) {
       const enemies = [];
-      const positions = [8, 18, 28, 38, 48, 55];
-      positions.forEach((ex, i) => {
+      const mw = mapWForLevel(lvl);
+      const features = levelFeatures(lvl);
+
+      const walkerPositions = [8, 18, 28, 38, 48, 55, 63, 72, 84].slice(0, 4 + lvl);
+      walkerPositions.forEach((ex, i) => {
+        if (ex >= mw - 8) return;
         enemies.push({
+          type: 'walker',
           x: ex * TILE, y: (13 - 1) * TILE,
           w: TILE - 4, h: TILE - 4,
           vx: -(0.8 + lvl * 0.3 + i * 0.1),
@@ -171,28 +225,69 @@
           stomped: false, stompTimer: 0
         });
       });
-      // Flying enemies patrol the air and swoop slightly as the player approaches.
-      const flyingPositions = [13, 26, 39, 52, mapWForLevel(lvl) - 10];
-      flyingPositions.forEach((ex, i) => {
-        enemies.push({
-          type: 'flyer',
-          x: ex * TILE, y: (5 + (i % 2)) * TILE,
-          baseY: (5 + (i % 2)) * TILE,
-          w: TILE - 2, h: TILE - 2,
-          vx: 1.1 + lvl * 0.15, vy: 0, alive: true, dir: 1,
-          phase: i * 1.4, stomped: false, stompTimer: 0
-        });
-      });
-      return enemies;
-    }
 
-    function mapWForLevel(lvl) {
-      return 60 + (lvl - 1) * 10;
+      if (features.flyers) {
+        const flyingPositions = [13, 26, 39, 52, 68, 84].filter(x => x < mw - 8);
+        flyingPositions.forEach((ex, i) => {
+          enemies.push({
+            type: 'flyer',
+            x: ex * TILE, y: (5 + (i % 2)) * TILE,
+            baseY: (5 + (i % 2)) * TILE,
+            w: TILE - 2, h: TILE - 2,
+            vx: 1.1 + lvl * 0.15, vy: 0, alive: true, dir: 1,
+            phase: i * 1.4, stomped: false, stompTimer: 0
+          });
+        });
+      }
+
+      if (features.throwers) {
+        const throwerPositions = [23, 47, 70, 88].filter(x => x < mw - 8);
+        throwerPositions.forEach(ex => {
+          enemies.push({
+            type: 'thrower',
+            x: ex * TILE, y: (13 - 1) * TILE,
+            w: TILE - 4, h: TILE - 4,
+            vx: 0, vy: 0, alive: true, dir: -1,
+            stomped: false, stompTimer: 0, throwTimer: 90
+          });
+        });
+      }
+
+      if (features.stompers) {
+        const stomperPositions = [34, 60, 82].filter(x => x < mw - 8);
+        stomperPositions.forEach(ex => {
+          enemies.push({
+            type: 'stomper',
+            x: ex * TILE, y: 3 * TILE,
+            homeY: 3 * TILE,
+            w: TILE, h: TILE,
+            vx: 0, vy: 0, alive: true, dir: 1,
+            stomped: false, stompTimer: 0, phase: 'idle', pauseTimer: 0
+          });
+        });
+      }
+
+      if (features.boss && BOSS_DATA[lvl]) {
+        const data = BOSS_DATA[lvl];
+        const bx = mw - 10;
+        enemies.push({
+          type: 'boss',
+          x: bx * TILE, y: (13 - 2) * TILE,
+          w: TILE + 12, h: TILE * 2 - 4,
+          vx: -(1 + lvl * 0.2), vy: 0, alive: true, dir: -1,
+          stomped: false, stompTimer: 0,
+          hp: data.hp, maxHp: data.hp, hurtTimer: 0,
+          body: data.body, dark: data.dark, name: data.name
+        });
+      }
+
+      return enemies;
     }
 
     // --- Globals ---
     let map, mapW, coins, powerups, spikes, goal, enemies, player;
-    const POWERUP_DURATION = { speed: 600, giant: 480 };
+    let fireballs = [], enemyProjectiles = [];
+    const POWERUP_DURATION = { speed: 600, giant: 480, fire: 600, star: 420 };
 
     function initLevel() {
       const { tiles, mapW: mw, spikes: levelSpikes, powerups: levelPowerups } = buildLevel(level);
@@ -203,7 +298,7 @@
       powerups = levelPowerups.map(item => ({ ...item, collected: false }));
       // Use the lowest goal tile (groundY - 1) as reference for the hitbox
       const goalTiles = tiles.filter(t => t.type === 4);
-      goal = goalTiles.reduce((lowest, t) => t.y > lowest.y ? t : lowest, goalTiles[0] || { x: (mw-4), y: 12 });
+      goal = goalTiles.reduce((lowest, t) => t.y > lowest.y ? t : lowest, goalTiles[0] || { x: (mw - 4), y: 12 });
 
       player = {
         x: TILE * 2, y: (13 - 2) * TILE,
@@ -212,11 +307,16 @@
         onGround: false,
         facing: 1,
         animFrame: 0, animTimer: 0,
-        speedTimer: 0, giantTimer: 0,
-        dead: false
+        speedTimer: 0, giantTimer: 0, fireTimer: 0, starTimer: 0,
+        invulnTimer: 0,
+        dead: false,
+        onPole: false
       };
 
       enemies = makeEnemies(level);
+      fireballs = [];
+      enemyProjectiles = [];
+      particles = [];
       cameraX = 0;
       gameState = 'playing';
       document.getElementById('message').textContent = '';
@@ -239,7 +339,7 @@
       return { tx1, tx2, ty1, ty2 };
     }
 
-    function moveWithCollision(e) {
+    function moveWithCollision(e, useGravity = true) {
       // Horizontal
       e.x += e.vx;
       let { tx1, tx2, ty1, ty2 } = tileCollide(e);
@@ -254,7 +354,7 @@
         }
       }
       // Vertical
-      e.vy += 0.5; // gravity
+      if (useGravity) e.vy += 0.5; // gravity
       e.y += e.vy;
       e.onGround = false;
       ({ tx1, tx2, ty1, ty2 } = tileCollide(e));
@@ -276,12 +376,13 @@
       const status = [];
       if (player && player.speedTimer > 0) status.push(`SPEED ${Math.ceil(player.speedTimer / 60)}s`);
       if (player && player.giantTimer > 0) status.push(`GIANT ${Math.ceil(player.giantTimer / 60)}s`);
+      if (player && player.fireTimer > 0) status.push(`FIRE ${Math.ceil(player.fireTimer / 60)}s`);
+      if (player && player.starTimer > 0) status.push(`STAR ${Math.ceil(player.starTimer / 60)}s`);
       document.getElementById('statusDisplay').textContent = status.join(' | ');
     }
 
     function setGiantMode(enabled) {
       const wasGiant = player.w > 28;
-      player.giantTimer = enabled ? POWERUP_DURATION.giant : 0;
       if (enabled && !wasGiant) {
         player.y -= 12;
         player.w = 38;
@@ -297,11 +398,37 @@
       item.collected = true;
       score += 250;
       if (item.type === 'speed') player.speedTimer = POWERUP_DURATION.speed;
-      if (item.type === 'giant') setGiantMode(true);
+      if (item.type === 'giant') { player.giantTimer = POWERUP_DURATION.giant; setGiantMode(true); }
+      if (item.type === 'fire') player.fireTimer = POWERUP_DURATION.fire;
+      if (item.type === 'star') player.starTimer = POWERUP_DURATION.star;
       document.getElementById('scoreDisplay').textContent = score;
-      document.getElementById('message').textContent = item.type === 'speed'
-        ? 'スピードアップ！'
-        : '巨大化！';
+      const labels = { speed: 'スピードアップ！', giant: '巨大化！', fire: 'ファイアパワー！', star: '無敵化！' };
+      document.getElementById('message').textContent = labels[item.type] || 'パワーアップ！';
+    }
+
+    function isEvolved() {
+      return player.giantTimer > 0 || player.fireTimer > 0 || player.speedTimer > 0;
+    }
+
+    // Losing an evolved form reverts the player to their base state instead of costing a life.
+    function revertToBase() {
+      player.speedTimer = 0;
+      player.fireTimer = 0;
+      if (player.giantTimer > 0) { player.giantTimer = 0; setGiantMode(false); }
+      player.invulnTimer = 90;
+      document.getElementById('message').textContent = 'パワーダウン！';
+      updateStatusDisplay();
+    }
+
+    function throwFireball() {
+      if (gameState !== 'playing' || !player || player.fireTimer <= 0) return;
+      fireballs.push({
+        x: player.facing > 0 ? player.x + player.w : player.x - 14,
+        y: player.y + player.h / 2 - 7,
+        w: 14, h: 14,
+        vx: 7 * player.facing, vy: -2,
+        alive: true
+      });
     }
 
     function hitPlayer() {
@@ -311,10 +438,34 @@
       document.getElementById('message').textContent = 'ミス！';
     }
 
+    function spawnGoalParticles() {
+      for (let i = 0; i < 40; i++) {
+        particles.push({
+          x: goal.x * TILE, y: (goal.y - 3) * TILE,
+          vx: (Math.random() - 0.5) * 6,
+          vy: -Math.random() * 6 - 2,
+          life: 60 + Math.random() * 30,
+          color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][i % 5]
+        });
+      }
+    }
+
     // --- Update ---
     function update() {
       if (gameState !== 'playing') {
         stateTimer++;
+
+        if (gameState === 'levelclear') {
+          // Slide the player down the flagpole for a short celebratory animation.
+          if (stateTimer <= 30 && player.y < (13 - 1) * TILE) {
+            player.y += 4;
+          } else if (stateTimer === 31) {
+            spawnGoalParticles();
+          }
+          particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; });
+          particles = particles.filter(p => p.life > 0);
+        }
+
         if (gameState === 'dead' && stateTimer > 90) {
           lives--;
           document.getElementById('livesDisplay').textContent = lives;
@@ -325,12 +476,12 @@
             initLevel();
           }
         }
-        if (gameState === 'levelclear' && stateTimer > 120) {
+        if (gameState === 'levelclear' && stateTimer > 150) {
           level++;
           document.getElementById('levelDisplay').textContent = level;
-          if (level > 3) {
+          if (level > TOTAL_LEVELS) {
             gameState = 'win';
-            document.getElementById('message').textContent = '🎉 クリア！ おめでとう！ スペースでリスタート';
+            document.getElementById('message').textContent = '🎉 全ステージクリア！ おめでとう！ スペースでリスタート';
           } else {
             initLevel();
           }
@@ -364,6 +515,9 @@
       moveWithCollision(player);
 
       if (player.speedTimer > 0) player.speedTimer--;
+      if (player.fireTimer > 0) player.fireTimer--;
+      if (player.starTimer > 0) player.starTimer--;
+      if (player.invulnTimer > 0) player.invulnTimer--;
       if (player.giantTimer > 0) {
         player.giantTimer--;
         if (player.giantTimer === 0) setGiantMode(false);
@@ -404,7 +558,7 @@
       // when there is no overlap with its triangular body.
       spikes.forEach(spike => {
         if (rectOverlap(player.x, player.y, player.w, player.h, spike.x * TILE + 4, spike.y * TILE + 10, TILE - 8, TILE - 10)) {
-          hitPlayer();
+          handlePlayerDamage();
         }
       });
       if (gameState !== 'playing') return;
@@ -413,10 +567,48 @@
       if (rectOverlap(player.x, player.y, player.w, player.h, goal.x * TILE, (goal.y - 3) * TILE, TILE, TILE * 4)) {
         gameState = 'levelclear';
         stateTimer = 0;
+        player.vx = 0;
+        player.x = goal.x * TILE - player.w - 2;
         score += 500;
         document.getElementById('scoreDisplay').textContent = score;
         document.getElementById('message').textContent = 'LEVEL CLEAR! +500';
       }
+
+      // Fireballs thrown by the player
+      fireballs.forEach(f => {
+        f.vy += 0.35;
+        f.x += f.vx;
+        f.y += f.vy;
+        if (f.onGround !== undefined) {}
+        const { tx1, tx2, ty1, ty2 } = tileCollide(f);
+        for (let tx = tx1; tx <= tx2; tx++) {
+          for (let ty = ty1; ty <= ty2; ty++) {
+            if (isSolidTile(tx, ty)) { f.alive = false; }
+          }
+        }
+        if (f.x < 0 || f.x > mapW * TILE || f.y > H + 50) f.alive = false;
+      });
+      fireballs = fireballs.filter(f => f.alive);
+
+      // Enemy-thrown projectiles
+      enemyProjectiles.forEach(p => {
+        p.vy += 0.3;
+        p.x += p.vx;
+        p.y += p.vy;
+        const { tx1, tx2, ty1, ty2 } = tileCollide(p);
+        for (let tx = tx1; tx <= tx2; tx++) {
+          for (let ty = ty1; ty <= ty2; ty++) {
+            if (isSolidTile(tx, ty)) p.alive = false;
+          }
+        }
+        if (p.x < 0 || p.x > mapW * TILE || p.y > H + 50) p.alive = false;
+        if (p.alive && !player.dead && rectOverlap(player.x, player.y, player.w, player.h, p.x, p.y, p.w, p.h)) {
+          p.alive = false;
+          handlePlayerDamage();
+        }
+      });
+      enemyProjectiles = enemyProjectiles.filter(p => p.alive);
+      if (gameState !== 'playing') return;
 
       // Enemies
       enemies.forEach(e => {
@@ -426,35 +618,120 @@
           if (e.stompTimer > 30) e.alive = false;
           return;
         }
+        if (e.hurtTimer > 0) e.hurtTimer--;
+
         if (e.type === 'flyer') {
           e.x += e.vx * e.dir;
           e.y = e.baseY + Math.sin((performance.now() / 250) + e.phase) * 14;
           if (e.x < 0 || e.x + e.w > mapW * TILE) e.dir *= -1;
+        } else if (e.type === 'thrower') {
+          e.throwTimer--;
+          if (e.throwTimer <= 0) {
+            e.throwTimer = 120;
+            const dir = player.x < e.x ? -1 : 1;
+            if (Math.abs(player.x - e.x) < TILE * 9) {
+              enemyProjectiles.push({
+                x: e.x + (dir > 0 ? e.w : -10), y: e.y + 4,
+                w: 10, h: 10, vx: dir * 4.5, vy: -4, alive: true
+              });
+            }
+          }
+        } else if (e.type === 'stomper') {
+          if (e.phase === 'idle') {
+            if (Math.abs(player.x + player.w / 2 - (e.x + e.w / 2)) < TILE * 0.8) {
+              e.phase = 'falling';
+              e.vy = 0;
+            }
+          } else if (e.phase === 'falling') {
+            e.vy += 0.7;
+            e.y += e.vy;
+            const { tx1, tx2, ty1, ty2 } = tileCollide(e);
+            let landed = false;
+            for (let tx = tx1; tx <= tx2; tx++) {
+              for (let ty = ty1; ty <= ty2; ty++) {
+                if (isSolidTile(tx, ty)) landed = true;
+              }
+            }
+            if (landed || e.y + e.h > H) {
+              e.phase = 'paused';
+              e.pauseTimer = 45;
+            }
+          } else if (e.phase === 'paused') {
+            e.pauseTimer--;
+            if (e.pauseTimer <= 0) e.phase = 'rising';
+          } else if (e.phase === 'rising') {
+            e.y -= 1.5;
+            if (e.y <= e.homeY) { e.y = e.homeY; e.phase = 'idle'; }
+          }
         } else {
+          // walker / boss patrol
           if (Math.abs(e.vx) > 0.01) e.dir = Math.sign(e.vx);
           moveWithCollision(e);
+          if (e.vx === 0) e.vx = -e.dir * (0.8 + level * 0.3) * (e.type === 'boss' ? 1.3 : 1);
+          if (e.x < 0) { e.vx = Math.abs(e.vx); e.dir = 1; }
+          if (e.x + e.w > mapW * TILE) { e.vx = -Math.abs(e.vx); e.dir = -1; }
         }
-        // Reverse at wall collision
-        if (e.type !== 'flyer' && e.vx === 0) e.vx = -e.dir * (0.8 + level * 0.3);
-        if (e.x < 0) { e.vx = Math.abs(e.vx); e.dir = 1; }
-        if (e.x + e.w > mapW * TILE) { e.vx = -Math.abs(e.vx); e.dir = -1; }
+
+        // Fireball vs enemy
+        fireballs.forEach(f => {
+          if (f.alive && rectOverlap(f.x, f.y, f.w, f.h, e.x, e.y, e.w, e.h)) {
+            f.alive = false;
+            damageEnemy(e);
+          }
+        });
 
         // Player vs enemy
+        if (!e.alive || e.stomped) return;
         if (!player.dead && rectOverlap(player.x, player.y, player.w, player.h, e.x, e.y, e.w, e.h)) {
-          // Stomp check: player falling and feet above enemy center
-          if (player.vy > 0 && player.y + player.h < e.y + e.h * 0.6) {
-            e.stomped = true;
+          const stompableY = e.type === 'stomper' ? e.y + e.h * 0.3 : e.y + e.h * 0.6;
+          if (player.vy > 0 && player.y + player.h < stompableY && e.type !== 'stomper') {
+            damageEnemy(e, true);
             player.vy = -7;
-            score += 200;
+            score += e.type === 'boss' ? 500 : 200;
             document.getElementById('scoreDisplay').textContent = score;
           } else {
-            hitPlayer();
+            handlePlayerDamage();
           }
         }
       });
+      fireballs = fireballs.filter(f => f.alive);
 
       // Camera
       cameraX = Math.max(0, Math.min(player.x - W / 3, mapW * TILE - W));
+    }
+
+    // Applies damage to an enemy from a stomp or fireball; bosses need multiple hits.
+    function damageEnemy(e, fromStomp = false) {
+      if (!e.alive || e.stomped) return;
+      if (e.type === 'boss') {
+        if (e.hurtTimer > 0) return;
+        e.hp--;
+        e.hurtTimer = 45;
+        if (e.hp <= 0) {
+          e.stomped = true;
+          e.stompTimer = 0;
+          score += 1000;
+          document.getElementById('scoreDisplay').textContent = score;
+          document.getElementById('message').textContent = `${e.name}をたおした！`;
+        } else if (!fromStomp) {
+          // knockback on non-stomp hit
+        }
+      } else {
+        e.stomped = true;
+        e.stompTimer = 0;
+      }
+    }
+
+    // Contact damage: invincible players destroy enemies; evolved players lose their
+    // power-up instead of a life; base-form players lose a life as usual.
+    function handlePlayerDamage() {
+      if (player.invulnTimer > 0) return;
+      if (player.starTimer > 0) return; // star grants full contact immunity
+      if (isEvolved()) {
+        revertToBase();
+      } else {
+        hitPlayer();
+      }
     }
 
     // --- Draw ---
@@ -483,11 +760,14 @@
       ctx.fill();
     }
 
+    const POWERUP_COLORS = { speed: '#2ecc71', giant: '#9b59b6', fire: '#e67e22', star: '#f1c40f' };
+    const POWERUP_LABELS = { speed: '>>', giant: 'G', fire: 'F', star: '★' };
+
     function drawPowerup(item) {
       const sx = item.x * TILE - cameraX + TILE / 2;
       const sy = item.y * TILE + TILE / 2;
       if (sx < -TILE || sx > W + TILE) return;
-      ctx.fillStyle = item.type === 'speed' ? '#2ecc71' : '#9b59b6';
+      ctx.fillStyle = POWERUP_COLORS[item.type] || '#fff';
       ctx.beginPath();
       ctx.arc(sx, sy, 12, 0, Math.PI * 2);
       ctx.fill();
@@ -495,7 +775,7 @@
       ctx.font = 'bold 14px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(item.type === 'speed' ? '>>' : 'G', sx, sy + 1);
+      ctx.fillText(POWERUP_LABELS[item.type] || '?', sx, sy + 1);
     }
 
     function drawSpikes(spike) {
@@ -520,13 +800,45 @@
       // Pole
       ctx.fillStyle = '#888';
       ctx.fillRect(sx + 14, baseY - 4 * TILE, 4, 4 * TILE);
-      // Flag
+      // Flag (slides down during the level-clear celebration)
+      const flagOffset = gameState === 'levelclear' ? Math.min(stateTimer, 30) * 4 : 0;
       ctx.fillStyle = '#00cc00';
       ctx.beginPath();
-      ctx.moveTo(sx + 18, baseY - 4 * TILE);
-      ctx.lineTo(sx + 18 + 20, baseY - 4 * TILE + 12);
-      ctx.lineTo(sx + 18, baseY - 4 * TILE + 24);
+      ctx.moveTo(sx + 18, baseY - 4 * TILE + flagOffset);
+      ctx.lineTo(sx + 18 + 20, baseY - 4 * TILE + 12 + flagOffset);
+      ctx.lineTo(sx + 18, baseY - 4 * TILE + 24 + flagOffset);
       ctx.fill();
+    }
+
+    function drawFireball(f) {
+      const sx = f.x - cameraX + f.w / 2;
+      const sy = f.y + f.h / 2;
+      ctx.fillStyle = '#ff4500';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawEnemyProjectile(p) {
+      const sx = p.x - cameraX + p.w / 2;
+      const sy = p.y + p.h / 2;
+      ctx.fillStyle = '#5d4037';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.life / 40));
+        ctx.fillRect(p.x - cameraX - 3, p.y - 3, 6, 6);
+        ctx.globalAlpha = 1;
+      });
     }
 
     function drawPlayer() {
@@ -534,15 +846,20 @@
       const sx = player.x - cameraX;
       const sy = player.y;
       ctx.save();
+      if (player.invulnTimer > 0 && Math.floor(player.invulnTimer / 4) % 2 === 0) ctx.globalAlpha = 0.4;
+      if (player.starTimer > 0) {
+        ctx.shadowColor = '#ffd700';
+        ctx.shadowBlur = 16;
+      }
       ctx.translate(sx + player.w / 2, sy + player.h / 2);
       if (player.facing < 0) ctx.scale(-1, 1);
       if (player.giantTimer > 0) ctx.scale(1.35, 1.35);
 
       // Body
-      ctx.fillStyle = '#e74c3c'; // red shirt
+      ctx.fillStyle = player.fireTimer > 0 ? '#ffffff' : '#e74c3c'; // fire suit is white
       ctx.fillRect(-14, -8, 28, 20);
       // Hat
-      ctx.fillStyle = '#e74c3c';
+      ctx.fillStyle = player.fireTimer > 0 ? '#e67e22' : '#e74c3c';
       ctx.fillRect(-10, -22, 26, 10);
       ctx.fillRect(-14, -14, 30, 8);
       // Face
@@ -555,7 +872,7 @@
       ctx.fillStyle = '#5d3a1a';
       ctx.fillRect(-6, -4, 14, 4);
       // Overall
-      ctx.fillStyle = '#2e86c1';
+      ctx.fillStyle = player.fireTimer > 0 ? '#e67e22' : '#2e86c1';
       ctx.fillRect(-14, 10, 28, 10);
       // Buttons
       ctx.fillStyle = '#f9e400';
@@ -563,7 +880,7 @@
       ctx.fillRect(4, 10, 4, 4);
       // Legs
       const legOffset = player.animFrame === 1 ? 4 : player.animFrame === 2 ? -4 : 0;
-      ctx.fillStyle = '#2e86c1';
+      ctx.fillStyle = player.fireTimer > 0 ? '#e67e22' : '#2e86c1';
       ctx.fillRect(-14, 20, 12, 12 + legOffset);
       ctx.fillRect(2, 20, 12, 12 - legOffset);
       // Shoes
@@ -585,6 +902,8 @@
         ctx.scale(1, 0.3);
         ctx.translate(0, e.h * 1.2);
       }
+      if (e.hurtTimer > 0 && Math.floor(e.hurtTimer / 4) % 2 === 0) ctx.globalAlpha = 0.5;
+
       if (e.type === 'flyer') {
         ctx.fillStyle = '#8e44ad';
         ctx.beginPath();
@@ -604,7 +923,67 @@
         ctx.restore();
         return;
       }
-      // Body
+
+      if (e.type === 'stomper') {
+        ctx.fillStyle = '#616a6b';
+        ctx.fillRect(-16, -16, 32, 32);
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillRect(-16, -16, 32, 8);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(-10, -4, 8, 8);
+        ctx.fillRect(2, -4, 8, 8);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-8, -2, 4, 4);
+        ctx.fillRect(4, -2, 4, 4);
+        ctx.restore();
+        return;
+      }
+
+      if (e.type === 'boss') {
+        ctx.fillStyle = e.dark;
+        ctx.beginPath();
+        ctx.ellipse(0, 4, e.w / 2, e.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = e.body;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, e.w / 2 - 4, e.h / 2 - 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Eyes
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(-14, -8, 10, 10);
+        ctx.fillRect(4, -8, 10, 10);
+        ctx.fillStyle = '#c0392b';
+        ctx.fillRect(-11, -5, 5, 5);
+        ctx.fillRect(7, -5, 5, 5);
+        // HP pips
+        for (let i = 0; i < e.maxHp; i++) {
+          ctx.fillStyle = i < e.hp ? '#e74c3c' : '#555';
+          ctx.fillRect(-e.w / 2 + 4 + i * 12, -e.h / 2 - 12, 9, 6);
+        }
+        ctx.restore();
+        return;
+      }
+
+      if (e.type === 'thrower') {
+        ctx.fillStyle = '#27ae60';
+        ctx.beginPath();
+        ctx.arc(0, 2, 13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#145a32';
+        ctx.beginPath();
+        ctx.ellipse(0, -8, 14, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(-9, -4, 6, 6);
+        ctx.fillRect(3, -4, 6, 6);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-7, -3, 3, 3);
+        ctx.fillRect(5, -3, 3, 3);
+        ctx.restore();
+        return;
+      }
+
+      // Body (walker)
       ctx.fillStyle = '#8B4513';
       ctx.beginPath();
       ctx.arc(0, 2, 13, 0, Math.PI * 2);
@@ -661,8 +1040,15 @@
       // Enemies
       enemies.forEach(drawEnemy);
 
+      // Projectiles
+      fireballs.forEach(drawFireball);
+      enemyProjectiles.forEach(drawEnemyProjectile);
+
       // Player
       drawPlayer();
+
+      // Celebration particles
+      drawParticles();
 
       // Overlay on state
       if (gameState !== 'playing') {
