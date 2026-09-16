@@ -106,6 +106,17 @@
       };
     }
 
+    // Shared with buildLevel so enemy spawns can avoid the narrow pockets formed
+    // between a staircase's ascending and descending halves (they would otherwise
+    // get boxed in and be unable to walk out).
+    function computeStairRanges(lvl, mapW) {
+      const stairHeight = Math.min(3 + Math.floor(lvl / 2), 6);
+      const stairBases = [12, 24, 45, 57].concat(lvl >= 3 ? [68] : []).concat(lvl >= 4 ? [80] : []).concat(lvl >= 5 ? [96] : []);
+      return stairBases
+        .filter(base => base + stairHeight * 2 < mapW - 6)
+        .map(base => [base, base + stairHeight * 2 - 1]);
+    }
+
     // --- Level maps (tile rows, 0=air, 1=ground, 2=brick, 3=coin, 4=goal) ---
     function buildLevel(lvl) {
       const groundY = 13;
@@ -143,9 +154,8 @@
 
       // Staircases add extra vertical platforming challenge; taller on later stages.
       const stairHeight = Math.min(3 + Math.floor(lvl / 2), 6);
-      const stairBases = [12, 24, 45, 57].concat(lvl >= 3 ? [68] : []).concat(lvl >= 4 ? [80] : []).concat(lvl >= 5 ? [96] : []);
-      stairBases.forEach(base => {
-        if (base + stairHeight * 2 >= mapW - 6) return;
+      const stairRanges = computeStairRanges(lvl, mapW);
+      stairRanges.forEach(([base]) => {
         for (let i = 0; i < stairHeight; i++) {
           tiles.push({ type: 2, x: base + i, y: groundY - 1 - i });
         }
@@ -153,6 +163,17 @@
           tiles.push({ type: 2, x: base + stairHeight + i, y: groundY - stairHeight + i });
         }
       });
+
+      // Solid-tile lookup used to keep coins/spikes/powerups from being embedded
+      // inside blocks (e.g. when a staircase tile happens to sit at a candidate spot).
+      const solidSet = new Set(tiles.filter(t => t.type === 1 || t.type === 2).map(t => `${t.x},${t.y}`));
+      const isSolidAt = (x, y) => solidSet.has(`${x},${y}`);
+      // Nudge a candidate spot straight up until it clears any overlapping block.
+      const clearOfBlocks = (x, y) => {
+        let ny = y;
+        while (isSolidAt(x, ny) && ny > 1) ny--;
+        return ny;
+      };
 
       // Coins scattered across platforms, stairs, and ground gaps.
       const coinPositions = [
@@ -170,7 +191,7 @@
         coinPositions.push([base, 9], [base + 4, 8], [base + 8, 7]);
       }
       coinPositions.forEach(([cx, cy]) => {
-        if (cx < mapW - 5 && !inHole(cx)) tiles.push({ type: 3, x: cx, y: cy });
+        if (cx < mapW - 5 && !inHole(cx)) tiles.push({ type: 3, x: cx, y: clearOfBlocks(cx, cy) });
       });
 
       // Spikes are separate from solid tiles so they can be drawn/handled as hazards.
@@ -181,7 +202,7 @@
       ];
       const spikeCount = Math.min(2 + lvl, spikeCandidates.length);
       const spikes = spikeCandidates.slice(0, spikeCount)
-        .filter(spike => spike.x < mapW - 5 && !inHole(spike.x));
+        .filter(spike => spike.x < mapW - 5 && !inHole(spike.x) && !isSolidAt(spike.x, spike.y));
 
       // Collectibles: new abilities unlock progressively across stages.
       const powerupCandidates = [
@@ -197,7 +218,8 @@
       const powerups = powerupCandidates
         .filter(item => item.type !== 'fire' || lvl >= 3)
         .filter(item => item.type !== 'star' || lvl >= 4)
-        .filter(item => item.x < mapW - 5 && !inHole(item.x));
+        .filter(item => item.x < mapW - 5 && !inHole(item.x))
+        .map(item => ({ ...item, y: clearOfBlocks(item.x, item.y) }));
 
       // Goal flag at end
       tiles.push({ type: 4, x: mapW - 4, y: groundY - 1 });
@@ -208,21 +230,52 @@
     }
 
     // --- Enemy ---
-    function makeEnemies(lvl) {
+    // groundTiles: the solid (type 1/2) tiles for the level, used so enemies spawn
+    // standing on the actual terrain instead of a fixed height — this prevents them
+    // from being embedded in / boxed in by staircases and platforms.
+    function makeEnemies(lvl, groundTiles) {
       const enemies = [];
       const mw = mapWForLevel(lvl);
       const features = levelFeatures(lvl);
+      const solidSet = new Set((groundTiles || []).map(t => `${t.x},${t.y}`));
+      // Finds the topmost solid tile in a column so a ground-walking enemy can be
+      // placed standing on it, wherever the terrain happens to be at that x.
+      function groundSpawnY(x) {
+        for (let y = 2; y <= 13; y++) {
+          if (solidSet.has(`${x},${y}`)) return (y - 1) * TILE;
+        }
+        return null; // column is over a pit — skip spawning here
+      }
 
       const walkerPositions = [8, 18, 28, 38, 48, 55, 63, 72, 84].slice(0, 4 + lvl);
       walkerPositions.forEach((ex, i) => {
         if (ex >= mw - 8) return;
+        const sy = groundSpawnY(ex);
+        if (sy === null) return;
         enemies.push({
           type: 'walker',
-          x: ex * TILE, y: (13 - 1) * TILE,
+          x: ex * TILE, y: sy,
           w: TILE - 4, h: TILE - 4,
           vx: -(0.8 + lvl * 0.3 + i * 0.1),
           vy: 0, alive: true, dir: -1,
           stomped: false, stompTimer: 0
+        });
+      });
+
+      // Koopa-like enemy: stomping it leaves behind a kickable shell instead of
+      // simply removing it, like Koopa Troopas dropping their shell.
+      const koopaPositions = [13, 33, 58, 76, 95].filter(x => x < mw - 8);
+      koopaPositions.forEach((ex, i) => {
+        const sy = groundSpawnY(ex);
+        if (sy === null) return;
+        enemies.push({
+          type: 'koopa',
+          x: ex * TILE, y: sy,
+          w: TILE - 4, h: TILE - 4,
+          vx: -(0.7 + lvl * 0.25 + i * 0.1),
+          vy: 0, alive: true, dir: -1,
+          stomped: false, stompTimer: 0,
+          isShell: false, shellMoving: false
         });
       });
 
@@ -243,9 +296,11 @@
       if (features.throwers) {
         const throwerPositions = [23, 47, 70, 88].filter(x => x < mw - 8);
         throwerPositions.forEach(ex => {
+          const sy = groundSpawnY(ex);
+          if (sy === null) return;
           enemies.push({
             type: 'thrower',
-            x: ex * TILE, y: (13 - 1) * TILE,
+            x: ex * TILE, y: sy,
             w: TILE - 4, h: TILE - 4,
             vx: 0, vy: 0, alive: true, dir: -1,
             stomped: false, stompTimer: 0, throwTimer: 90
@@ -313,7 +368,7 @@
         onPole: false
       };
 
-      enemies = makeEnemies(level);
+      enemies = makeEnemies(level, map);
       fireballs = [];
       enemyProjectiles = [];
       particles = [];
@@ -436,6 +491,12 @@
       stateTimer = 0;
       player.dead = true;
       document.getElementById('message').textContent = 'ミス！';
+    }
+
+    // Stages that have a boss must have it defeated before the goal can be reached.
+    function bossBlockingGoal() {
+      const boss = enemies.find(e => e.type === 'boss');
+      return !!boss && boss.alive && !boss.stomped;
     }
 
     function spawnGoalParticles() {
@@ -563,15 +624,23 @@
       });
       if (gameState !== 'playing') return;
 
-      // Goal — hitbox spans 4 tiles upward from lowest goal tile
+      // Goal — hitbox spans 4 tiles upward from lowest goal tile.
+      // Stages with a boss are gated behind defeating it: an invisible wall
+      // at the goal keeps the player from finishing until the boss is gone.
       if (rectOverlap(player.x, player.y, player.w, player.h, goal.x * TILE, (goal.y - 3) * TILE, TILE, TILE * 4)) {
-        gameState = 'levelclear';
-        stateTimer = 0;
-        player.vx = 0;
-        player.x = goal.x * TILE - player.w - 2;
-        score += 500;
-        document.getElementById('scoreDisplay').textContent = score;
-        document.getElementById('message').textContent = 'LEVEL CLEAR! +500';
+        if (bossBlockingGoal()) {
+          player.x = Math.min(player.x, goal.x * TILE - player.w - 2);
+          player.vx = 0;
+          document.getElementById('message').textContent = 'ボスを倒さないとクリアできない！';
+        } else {
+          gameState = 'levelclear';
+          stateTimer = 0;
+          player.vx = 0;
+          player.x = goal.x * TILE - player.w - 2;
+          score += 500;
+          document.getElementById('scoreDisplay').textContent = score;
+          document.getElementById('message').textContent = 'LEVEL CLEAR! +500';
+        }
       }
 
       // Fireballs thrown by the player
@@ -620,7 +689,13 @@
         }
         if (e.hurtTimer > 0) e.hurtTimer--;
 
-        if (e.type === 'flyer') {
+        if (e.type === 'koopa' && e.isShell) {
+          // Idle shells sit still; kicked shells slide and act as a weapon.
+          if (e.shellMoving) {
+            moveWithCollision(e);
+            if (e.x <= 0 || e.x + e.w >= mapW * TILE) e.vx *= -1;
+          }
+        } else if (e.type === 'flyer') {
           e.x += e.vx * e.dir;
           e.y = e.baseY + Math.sin((performance.now() / 250) + e.phase) * 14;
           if (e.x < 0 || e.x + e.w > mapW * TILE) e.dir *= -1;
@@ -680,11 +755,46 @@
           }
         });
 
+        // A moving shell acts as a weapon against other enemies.
+        if (e.type === 'koopa' && e.isShell && e.shellMoving) {
+          enemies.forEach(other => {
+            if (other === e || !other.alive || other.stomped) return;
+            if (rectOverlap(e.x, e.y, e.w, e.h, other.x, other.y, other.w, other.h)) {
+              damageEnemy(other);
+              score += other.type === 'boss' ? 500 : 200;
+              document.getElementById('scoreDisplay').textContent = score;
+            }
+          });
+        }
+
         // Player vs enemy
         if (!e.alive || e.stomped) return;
         if (!player.dead && rectOverlap(player.x, player.y, player.w, player.h, e.x, e.y, e.w, e.h)) {
           const stompableY = e.type === 'stomper' ? e.y + e.h * 0.3 : e.y + e.h * 0.6;
-          if (player.vy > 0 && player.y + player.h < stompableY && e.type !== 'stomper') {
+          const isStomp = player.vy > 0 && player.y + player.h < stompableY && e.type !== 'stomper';
+
+          if (e.type === 'koopa' && e.isShell && !isStomp) {
+            // Touching an idle shell from the side kicks it; a moving shell hurts on contact.
+            if (e.shellMoving) {
+              if (player.starTimer > 0) {
+                damageEnemy(e);
+                score += 200;
+                document.getElementById('scoreDisplay').textContent = score;
+              } else {
+                handlePlayerDamage();
+              }
+            } else {
+              e.shellMoving = true;
+              e.dir = player.x < e.x ? 1 : -1;
+              e.vx = e.dir * 6.5;
+            }
+          } else if (player.starTimer > 0) {
+            // Invincibility (star power) lets the player defeat enemies on contact.
+            damageEnemy(e);
+            player.vy = isStomp ? -7 : player.vy;
+            score += e.type === 'boss' ? 500 : 200;
+            document.getElementById('scoreDisplay').textContent = score;
+          } else if (isStomp) {
             damageEnemy(e, true);
             player.vy = -7;
             score += e.type === 'boss' ? 500 : 200;
@@ -700,7 +810,8 @@
       cameraX = Math.max(0, Math.min(player.x - W / 3, mapW * TILE - W));
     }
 
-    // Applies damage to an enemy from a stomp or fireball; bosses need multiple hits.
+    // Applies damage to an enemy from a stomp or fireball; bosses need multiple hits,
+    // and koopas turn into a shell on their first hit instead of being removed outright.
     function damageEnemy(e, fromStomp = false) {
       if (!e.alive || e.stomped) return;
       if (e.type === 'boss') {
@@ -716,6 +827,13 @@
         } else if (!fromStomp) {
           // knockback on non-stomp hit
         }
+      } else if (e.type === 'koopa' && !e.isShell) {
+        // First hit knocks the koopa out of its shell, leaving a kickable shell behind.
+        e.isShell = true;
+        e.shellMoving = false;
+        e.vx = 0;
+        e.h = TILE - 16;
+        e.y += (TILE - 4) - e.h;
       } else {
         e.stomped = true;
         e.stompTimer = 0;
@@ -726,7 +844,7 @@
     // power-up instead of a life; base-form players lose a life as usual.
     function handlePlayerDamage() {
       if (player.invulnTimer > 0) return;
-      if (player.starTimer > 0) return; // star grants full contact immunity
+      if (player.starTimer > 0) return; // star grants full contact immunity (hazards like spikes)
       if (isEvolved()) {
         revertToBase();
       } else {
@@ -888,6 +1006,15 @@
       ctx.fillRect(-16, 30 + legOffset, 14, 6);
       ctx.fillRect(0, 30 - legOffset, 14, 6);
 
+      // Arms — swing opposite to the legs while walking, and raise up while airborne.
+      const armSwing = !player.onGround ? -10 : -legOffset;
+      ctx.fillStyle = player.fireTimer > 0 ? '#ffffff' : '#e74c3c';
+      ctx.fillRect(-19, -6 + armSwing * 0.5, 6, 14);
+      ctx.fillRect(13, -6 - armSwing * 0.5, 6, 14);
+      ctx.fillStyle = '#f5cba7';
+      ctx.fillRect(-19, 6 + armSwing, 6, 6);
+      ctx.fillRect(13, 6 - armSwing, 6, 6);
+
       ctx.restore();
     }
 
@@ -903,6 +1030,52 @@
         ctx.translate(0, e.h * 1.2);
       }
       if (e.hurtTimer > 0 && Math.floor(e.hurtTimer / 4) % 2 === 0) ctx.globalAlpha = 0.5;
+
+      if (e.type === 'koopa') {
+        if (e.isShell) {
+          // Green shell — spins while kicked, sits still otherwise.
+          if (e.shellMoving) ctx.rotate((performance.now() / 60) % (Math.PI * 2));
+          ctx.fillStyle = '#27ae60';
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 15, 12, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#1e8449';
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#145a32';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        } else {
+          // Body
+          ctx.fillStyle = '#f1c40f';
+          ctx.beginPath();
+          ctx.ellipse(0, 4, 12, 9, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // Shell on its back
+          ctx.fillStyle = '#27ae60';
+          ctx.beginPath();
+          ctx.ellipse(0, -2, 13, 10, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#1e8449';
+          ctx.beginPath();
+          ctx.ellipse(0, -2, 7, 6, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // Eyes
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(-8, -6, 5, 5);
+          ctx.fillRect(3, -6, 5, 5);
+          ctx.fillStyle = '#000';
+          ctx.fillRect(-6, -5, 2, 2);
+          ctx.fillRect(5, -5, 2, 2);
+          // Feet
+          ctx.fillStyle = '#e67e22';
+          ctx.fillRect(-11, 9, 8, 5);
+          ctx.fillRect(3, 9, 8, 5);
+        }
+        ctx.restore();
+        return;
+      }
 
       if (e.type === 'flyer') {
         ctx.fillStyle = '#8e44ad';
