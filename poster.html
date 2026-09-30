@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>探求ポスター | JavaScriptでつくるアクションゲーム「Super JS Bros」</title>
+<style>
+  :root{
+    --sky:#5c94fc;
+    --dark:#212121;
+    --brick:#c84c0c;
+    --gold:#ffcc00;
+    --green:#43b047;
+    --panel:#ffffff;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    font-family:"Yu Gothic","Hiragino Kaku Gothic ProN","Meiryo",sans-serif;
+    background:#e8eef7;
+    color:var(--dark);
+  }
+  .poster{
+    width:1200px;
+    margin:24px auto;
+    background:var(--panel);
+    box-shadow:0 6px 24px rgba(0,0,0,.25);
+    border-radius:10px;
+    overflow:hidden;
+  }
+  /* ---------- Header / Title slide ---------- */
+  header.title-slide{
+    background:linear-gradient(180deg,var(--sky) 0%,#3b6fe0 100%);
+    color:#fff;
+    padding:30px 40px 20px;
+    position:relative;
+  }
+  header.title-slide h1{
+    font-size:38px;
+    margin:0 0 6px;
+    text-shadow:3px 3px 0 #00000055;
+    letter-spacing:1px;
+  }
+  header.title-slide p.subtitle{
+    margin:0;
+    font-size:18px;
+    opacity:.95;
+  }
+  .badge-row{
+    display:flex;
+    gap:10px;
+    margin-top:14px;
+    flex-wrap:wrap;
+  }
+  .badge{
+    background:#ffffffcc;
+    color:#1a3d8f;
+    font-size:13px;
+    font-weight:bold;
+    padding:5px 12px;
+    border-radius:999px;
+  }
+  /* ---------- Grid layout ---------- */
+  .grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:18px;
+    padding:24px 30px 34px;
+  }
+  .grid .span2{ grid-column:span 2; }
+  .grid .span3{ grid-column:span 3; }
+  .card{
+    background:#fbfbfd;
+    border:2px solid #dfe4f0;
+    border-radius:10px;
+    padding:18px 20px;
+  }
+  .card h2{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:19px;
+    margin:0 0 10px;
+    color:#1a3d8f;
+    border-bottom:3px solid var(--gold);
+    padding-bottom:6px;
+  }
+  .card h2 .icon-num{
+    background:var(--brick);
+    color:#fff;
+    width:26px;height:26px;
+    border-radius:50%;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:13px;
+  }
+  .card p, .card li{
+    font-size:14px;
+    line-height:1.7;
+  }
+  .card ul{ margin:6px 0 0; padding-left:20px; }
+
+  /* progress bar */
+  .progress-wrap{
+    background:#e3e6ee;
+    border-radius:8px;
+    height:18px;
+    overflow:hidden;
+    margin:8px 0 4px;
+  }
+  .progress-bar{
+    height:100%;
+    background:repeating-linear-gradient(45deg,var(--green),var(--green) 10px,#59c95d 10px,#59c95d 20px);
+    width:30%;
+  }
+  .progress-label{ font-size:12px; color:#555; }
+
+  figure{ margin:0; text-align:center; }
+  figcaption{ font-size:12px; color:#666; margin-top:6px; }
+
+  footer{
+    background:var(--dark);
+    color:#fff;
+    text-align:center;
+    padding:14px;
+    font-size:13px;
+  }
+</style>
+</head>
+<body>
+<div class="poster">
+
+  <!-- ============ TITLE ============ -->
+  <header class="title-slide">
+    <h1>🎮 JavaScriptでつくるアクションゲーム「Super JS Bros」</h1>
+    <p class="subtitle">〜 ブラウザだけで動くマリオ風ゲームの自作に挑戦する探求活動 〜</p>
+    <div class="badge-row">
+      <span class="badge">探求テーマ：ゲームプログラミング</span>
+      <span class="badge">使用言語：HTML / CSS / JavaScript</span>
+      <span class="badge">進捗状況：探求中（初期〜中期段階）</span>
+    </div>
+  </header>
+
+  <!-- ============ MAIN GRID ============ -->
+  <div class="grid">
+
+    <!-- 1. Motivation -->
+    <div class="card">
+      <h2><span class="icon-num">1</span>探求の動機・目的</h2>
+      <svg width="100%" height="90" viewBox="0 0 300 90">
+        <rect x="0" y="0" width="300" height="90" fill="#dff0ff" rx="8"/>
+        <circle cx="45" cy="45" r="30" fill="#ffd54f"/>
+        <path d="M45 20 a25 25 0 0 1 0 50" fill="none" stroke="#ffb300" stroke-width="4"/>
+        <text x="90" y="40" font-size="13" fill="#1a3d8f" font-weight="bold">好きなゲームを</text>
+        <text x="90" y="58" font-size="13" fill="#1a3d8f" font-weight="bold">自分の手で作りたい！</text>
+      </svg>
+      <p>幼い頃から遊んでいたアクションゲームに憧れ、「自分でも同じような仕組みを作れるのか」を確かめたいと考え、
+      プログラミング未経験からJavaScriptでの2Dアクションゲーム制作に挑戦することにした。</p>
+    </div>
+
+    <!-- 2. What is it -->
+    <div class="card">
+      <h2><span class="icon-num">2</span>制作物の概要</h2>
+      <svg width="100%" height="90" viewBox="0 0 300 90">
+        <rect x="0" y="0" width="300" height="90" fill="#111" rx="6"/>
+        <rect x="10" y="10" width="280" height="70" fill="var(--sky)"/>
+        <rect x="10" y="60" width="280" height="20" fill="#8a5a2b"/>
+        <rect x="230" y="20" width="16" height="40" fill="#3aa63a"/>
+        <ellipse cx="238" cy="20" rx="14" ry="6" fill="#3aa63a"/>
+        <rect x="50" y="45" width="14" height="15" fill="#c84c0c"/>
+        <circle cx="57" cy="42" r="7" fill="#ffcf9e"/>
+        <rect x="100" y="55" width="14" height="10" fill="#8a5a2b"/>
+        <circle cx="130" cy="45" r="6" fill="var(--gold)"/>
+      </svg>
+      <p>ブラウザの&lt;canvas&gt;だけで動く横スクロール型アクションゲーム。プレイヤーを操作し、
+      コインやアイテムを集めながらゴールを目指す、いわゆる「マリオ風」ゲーム。</p>
+    </div>
+
+    <!-- 3. Tech stack -->
+    <div class="card">
+      <h2><span class="icon-num">3</span>使用技術</h2>
+      <svg width="100%" height="90" viewBox="0 0 300 90">
+        <rect x="10" y="15" width="80" height="60" rx="8" fill="#e8600c"/>
+        <text x="50" y="52" font-size="20" fill="#fff" text-anchor="middle" font-weight="bold">HTML</text>
+        <rect x="110" y="15" width="80" height="60" rx="8" fill="#2965f1"/>
+        <text x="150" y="52" font-size="20" fill="#fff" text-anchor="middle" font-weight="bold">CSS</text>
+        <rect x="210" y="15" width="80" height="60" rx="8" fill="#f0db4f"/>
+        <text x="250" y="52" font-size="18" fill="#333" text-anchor="middle" font-weight="bold">JS</text>
+      </svg>
+      <ul>
+        <li>HTML5 Canvas によるグラフィック描画</li>
+        <li>JavaScript によるゲームループ・当たり判定・敵AI</li>
+        <li>外部ライブラリ不使用（すべて自作コード）</li>
+      </ul>
+    </div>
+
+    <!-- 4. Features (span2) -->
+    <div class="card span2">
+      <h2><span class="icon-num">4</span>実装できた機能</h2>
+      <svg width="100%" height="110" viewBox="0 0 620 110">
+        <rect width="620" height="110" fill="#dff0ff" rx="8"/>
+        <!-- player jump -->
+        <g>
+          <rect x="30" y="60" width="16" height="18" fill="#c84c0c"/>
+          <circle cx="38" cy="55" r="8" fill="#ffcf9e"/>
+          <path d="M38 30 q0 20 0 25" stroke="#999" stroke-dasharray="3 3" fill="none"/>
+          <text x="10" y="98" font-size="11" fill="#1a3d8f">ジャンプ</text>
+        </g>
+        <!-- fireball -->
+        <g>
+          <circle cx="140" cy="55" r="9" fill="#ff5722"/>
+          <circle cx="160" cy="55" r="5" fill="#ff9800"/>
+          <text x="110" y="98" font-size="11" fill="#1a3d8f">ファイア攻撃</text>
+        </g>
+        <!-- enemy -->
+        <g>
+          <ellipse cx="240" cy="65" rx="16" ry="12" fill="#8a4b2b"/>
+          <circle cx="233" cy="60" r="3" fill="#fff"/>
+          <circle cx="247" cy="60" r="3" fill="#fff"/>
+          <text x="205" y="98" font-size="11" fill="#1a3d8f">敵キャラクター</text>
+        </g>
+        <!-- coin -->
+        <g>
+          <circle cx="330" cy="55" r="12" fill="var(--gold)" stroke="#c99200" stroke-width="2"/>
+          <text x="308" y="98" font-size="11" fill="#1a3d8f">コイン収集</text>
+        </g>
+        <!-- powerup -->
+        <g>
+          <rect x="400" y="45" width="22" height="22" rx="4" fill="#ff4081"/>
+          <text x="411" y="61" font-size="14" fill="#fff" text-anchor="middle">★</text>
+          <text x="385" y="98" font-size="11" fill="#1a3d8f">パワーアップ</text>
+        </g>
+        <!-- boss -->
+        <g>
+          <rect x="480" y="35" width="34" height="34" fill="#6a1b9a" rx="6"/>
+          <circle cx="490" cy="48" r="3" fill="#fff"/>
+          <circle cx="505" cy="48" r="3" fill="#fff"/>
+          <text x="480" y="98" font-size="11" fill="#1a3d8f">ボス戦</text>
+        </g>
+        <!-- flag -->
+        <g>
+          <rect x="580" y="25" width="4" height="55" fill="#3aa63a"/>
+          <path d="M584 25 l20 8 l-20 8 z" fill="#fff"/>
+          <text x="560" y="98" font-size="11" fill="#1a3d8f">ゴール</text>
+        </g>
+      </svg>
+      <ul>
+        <li>左右移動・ジャンプ操作、複数種類の敵とその当たり判定</li>
+        <li>コイン・パワーアップ（スピード／巨大化／ファイア／無敵）アイテム</li>
+        <li>全5ステージ構成、ステージ3以降はボスキャラクターが登場</li>
+        <li>スコア・残り機数・レベル表示のUI実装</li>
+      </ul>
+    </div>
+
+    <!-- 5. Progress -->
+    <div class="card">
+      <h2><span class="icon-num">5</span>現在の進捗</h2>
+      <p class="progress-label">全体の完成度（現時点・探求中のため低め）</p>
+      <div class="progress-wrap"><div class="progress-bar"></div></div>
+      <ul>
+        <li>基本的な移動・ジャンプ・当たり判定 → 完了</li>
+        <li>5ステージ分のマップと敵配置 → 完了</li>
+        <li>サウンド・エフェクトの追加 → 未着手</li>
+        <li>難易度調整・バランス確認 → 進行中</li>
+      </ul>
+    </div>
+
+    <!-- 6. Struggles -->
+    <div class="card">
+      <h2><span class="icon-num">6</span>苦労した点・工夫</h2>
+      <svg width="100%" height="80" viewBox="0 0 300 80">
+        <rect width="300" height="80" fill="#fff3cd" rx="8"/>
+        <polygon points="40,20 60,60 20,60" fill="#ffcf00" stroke="#a97b00" stroke-width="2"/>
+        <text x="34" y="52" font-size="18" fill="#a97b00" font-weight="bold">!</text>
+        <text x="80" y="40" font-size="13" fill="#7a4a00">当たり判定のズレや</text>
+        <text x="80" y="58" font-size="13" fill="#7a4a00">敵の出現位置に苦戦</text>
+      </svg>
+      <p>坂道や階段状の地形で敵やアイテムが埋まってしまう不具合が発生。地形データから
+      実際に足場のある座標を計算し直す仕組みを導入して解決した。</p>
+    </div>
+
+    <!-- 7. Future plan (span2) -->
+    <div class="card span2">
+      <h2><span class="icon-num">7</span>今後の展望</h2>
+      <svg width="100%" height="70" viewBox="0 0 620 70">
+        <rect width="620" height="70" fill="#e8f5e9" rx="8"/>
+        <circle cx="40" cy="35" r="14" fill="var(--green)"/><text x="34" y="40" fill="#fff" font-size="14">1</text>
+        <line x1="60" y1="35" x2="180" y2="35" stroke="#43b047" stroke-width="3" stroke-dasharray="6 4"/>
+        <circle cx="200" cy="35" r="14" fill="var(--green)"/><text x="194" y="40" fill="#fff" font-size="14">2</text>
+        <line x1="220" y1="35" x2="340" y2="35" stroke="#43b047" stroke-width="3" stroke-dasharray="6 4"/>
+        <circle cx="360" cy="35" r="14" fill="var(--green)"/><text x="354" y="40" fill="#fff" font-size="14">3</text>
+        <line x1="380" y1="35" x2="500" y2="35" stroke="#43b047" stroke-width="3" stroke-dasharray="6 4"/>
+        <circle cx="520" cy="35" r="14" fill="var(--green)"/><text x="514" y="40" fill="#fff" font-size="14">4</text>
+      </svg>
+      <ul>
+        <li>① 効果音・BGMの追加でゲーム体験を向上</li>
+        <li>② スマートフォン操作（タッチ操作）への対応</li>
+        <li>③ ステージ数を増やし、新しい敵・ギミックを追加</li>
+        <li>④ 友人にプレイしてもらいフィードバックを反映</li>
+      </ul>
+    </div>
+
+    <!-- 8. Summary -->
+    <div class="card span3">
+      <h2><span class="icon-num">8</span>まとめ</h2>
+      <p>プログラミング未経験からのスタートだったが、JavaScriptのみで基本的なアクションゲームの仕組み
+      （操作・当たり判定・敵AI・ステージ進行）を実装できた。現段階では探求の途中であり完成度は高くないが、
+      今後は演出面・操作性・コンテンツ量を強化し、より遊びごたえのあるゲームへ発展させていきたい。</p>
+    </div>
+
+  </div>
+
+  <footer>探求活動ポスター（作成中） ／ 制作：Super JS Bros 開発チーム</footer>
+</div>
+</body>
+</html>
